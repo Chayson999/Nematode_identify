@@ -1,0 +1,14 @@
+# 线虫运动识别系统 - Python 依赖
+#
+# 体积优化：torch 建议装 CPU 版（约 200 MB，而不是 CUDA 版 2 GB+）：
+#   python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+# 安装脚本 1-安装依赖.bat 已自动这么做。
+flask
+flask-socketio
+opencv-python
+ultralytics
+supervision
+torch
+scipy
+scikit-image
+numpy

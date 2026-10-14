@@ -1,0 +1,19 @@
+# 运行时数据与训练输出（体积大，不入版本库）
+backend/data/
+backend/runs/
+backend/models/*.bak
+
+# 本地虚拟环境（体积大，不入库/不打包）
+backend/.venv/
+.venv/
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+
+# 前端依赖与构建产物
+frontend-src/node_modules/
+frontend-src/build/
+
+# 模型权重（如需入库请删除下面两行）
+# backend/models/*.pt
