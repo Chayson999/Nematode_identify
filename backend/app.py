@@ -20,6 +20,7 @@ from worm_processing import (
     EnhancedWormTracker,
     INFER_IMGSZ,
     SWING_DIAG,
+    SUMMARY_MIN_HITS,
     OVERLAY_MODE_DEBUG,
     OVERLAY_MODE_RELEASE,
 )
@@ -152,9 +153,16 @@ def build_id_pose_summary(tracker):
     """
     构建ID和姿态摘要
     包含：track_id、周期数、频率、运动类型、活性分数
+
+    只保留"真正观测足够多"的 ID（hits >= SUMMARY_MIN_HITS）：瞬时噪声轨迹不进入汇总，
+    否则汇总/界面列表里的"虫子数"会明显多于实际数量。
     """
     summary = []
+    track_map = {int(t.track_id): t for t in getattr(tracker, 'tracks', [])}
     for track_id, cycle_info in sorted(tracker.cycle_counts.items(), key=lambda x: int(x[0])):
+        _track = track_map.get(int(track_id))
+        if _track is None or int(getattr(_track, 'hits', 0)) < SUMMARY_MIN_HITS:
+            continue
         avg_freq = cycle_info.get('avg_freq', cycle_info.get('average_frequency', cycle_info.get('freq', 0.0)))
         live_freq = cycle_info.get('live_freq', cycle_info.get('realtime_freq', avg_freq))
         summary.append({
@@ -635,7 +643,7 @@ def process_video_task(task_id, video_path):
                     status='processing',
                     current_frame=frame_idx,
                     total_frames=total_frames,
-                    active_tracks=len(tracker.tracks),
+                    active_tracks=getattr(tracker, 'live_track_count', len(tracker.tracks)),
                     latest_frame=frame_b64,
                     tracks=track_data,
                 )
@@ -795,7 +803,7 @@ def process_video_task(task_id, video_path):
                 status='processing',
                 current_frame=frame_idx,
                 total_frames=total_frames,
-                active_tracks=len(tracker.tracks),
+                active_tracks=getattr(tracker, 'live_track_count', len(tracker.tracks)),
                 latest_frame=frame_b64,
                 tracks=track_data,
             )

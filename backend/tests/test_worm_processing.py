@@ -378,18 +378,27 @@ class DedupAndTouchingTests(unittest.TestCase):
             0, self._dets([[305, 301, 345, 311]], masks=[same]), np.asarray([same]), [],
             5 + tracker.birth_cooldown_frames + 1), '冷却结束后允许出生')
 
-    def test_sub_video_only_created_after_confirmation(self):
-        """未确认的瞬时误检不应产生垃圾子视频文件。"""
+    def test_sub_video_only_created_after_stable_observation(self):
+        """未确认、或观测帧数太少的轨迹都不建子视频；命中数达到 sub_video_min_hits 才建。
+
+        目的：避免瞬时噪声 ID 在下载的 ZIP/列表里变成"多出来的虫子"。
+        """
         with tempfile.TemporaryDirectory() as tmp:
             tracker = EnhancedWormTracker(fps=10, frame_size=(self.W, self.H), sub_video_dir=tmp)
             box = [100, 100, 140, 110]
             tracker.update_tracking(self._dets([box]), None, 1)
-            self.assertFalse(os.listdir(tmp), '未确认时不应建子视频')
+            self.assertFalse(os.listdir(tmp), '第 1 帧不应建子视频')
 
             for i in range(2, 6):
                 tracker.update_tracking(self._dets([box]), None, i)
-            self.assertTrue(tracker.tracks[0].confirmed)
-            self.assertTrue(os.listdir(tmp), '确认后应建子视频')
+            self.assertTrue(tracker.tracks[0].confirmed, '命中 5 帧后应确认')
+            self.assertLess(tracker.tracks[0].hits, tracker.sub_video_min_hits)
+            self.assertFalse(os.listdir(tmp), '确认了但观测太短，仍不应建子视频')
+
+            for i in range(6, tracker.sub_video_min_hits + 2):
+                tracker.update_tracking(self._dets([box]), None, i)
+            self.assertGreaterEqual(tracker.tracks[0].hits, tracker.sub_video_min_hits)
+            self.assertTrue(os.listdir(tmp), '达到 sub_video_min_hits 后应建子视频')
             if tracker.tracks[0].sub_video_writer is not None:
                 tracker.tracks[0].sub_video_writer.release()
 

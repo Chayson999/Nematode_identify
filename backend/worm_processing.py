@@ -62,7 +62,9 @@ SWING_POSTURE_UNIT = str(os.environ.get('SWING_POSTURE_UNIT', 'each')).strip().l
 
 # ==================== 视觉残留（识别中断时保留序号）参数 ====================
 TRACK_PERSISTENCE_SEC = 600.0   # 目标丢失后 ID 保留时长（秒），期间不会被回收，也不会被新目标抢占
-GHOST_OVERLAY_SEC = 5.0        # 丢失后仍绘制残留框 + ID 的时长（秒）
+GHOST_OVERLAY_SEC = float(os.environ.get('GHOST_OVERLAY_SEC', '1.5'))  # 丢失后仍绘制残留框 + ID 的时长（秒）
+SUB_VIDEO_MIN_HITS = int(os.environ.get('SUB_VIDEO_MIN_HITS', '15'))   # 命中多少帧才为它建子视频（避免噪声 ID 变成"多出来的虫子"）
+SUMMARY_MIN_HITS = int(os.environ.get('SUMMARY_MIN_HITS', '15'))       # 汇总只保留命中帧数达标的 ID
 STALE_UNOBSERVED_SEC = float(os.environ.get('STALE_UNOBSERVED_SEC', '3.0'))   # 超过该秒数没有新观测即视为数据过期
 # ==================== ROI 找回（针对停止运动后长期漏检的目标） ====================
 ROI_RECOVER_ENABLED = str(os.environ.get('ROI_RECOVER', '1')).strip().lower() not in ('0', 'false', 'no', '')
@@ -1462,6 +1464,10 @@ class EnhancedWormTracker:
         self.ghost_overlay_frames = int(round(GHOST_OVERLAY_SEC * fps))
         self.max_lost_frames = max(int(fps * MAX_LOST_FRAMES), self.persistence_frames)
         self.confirm_hits = 5
+        self.sub_video_min_hits = max(int(self.confirm_hits), int(SUB_VIDEO_MIN_HITS))
+        # 本帧"真正在跟踪"的目标数（已确认且本帧有观测/共享），用于界面"活跃目标"显示。
+        # 注意不能用 len(self.tracks)：残留在后台保留 600 秒，会让数量看起来远超实际虫子数。
+        self.live_track_count = 0
         self.iou_match_thresh = 0.5
         self.iou_secondary = 0.3
         self.appearance_weight = 0.3
@@ -2487,6 +2493,7 @@ class EnhancedWormTracker:
                 track.predict()          # 本帧没有检测：先做一次卡尔曼预测（每帧只预测一次）
             self._handle_lost_tracks(list(range(len(self.tracks))), frame, frame_idx)
             self._prune_lost_tracks()
+            self.live_track_count = 0    # 本帧没有任何真实观测
             ghost_tracks = [t for t in self.tracks if t.track_id in self.ghost_ids]
             empty_dets = sv.Detections.empty()
             empty_dets.tracker_id = np.array([], dtype=int)
@@ -2522,7 +2529,10 @@ class EnhancedWormTracker:
             if not track.confirmed and track.hits >= self.confirm_hits:
                 track.confirmed = True
                 self.confirmed_ids.add(track.track_id)
-                # 确认后才建子视频写入器：未确认的瞬时误检不再产生垃圾子视频文件
+            # 子视频只给"稳定观测"的目标建：命中帧数达到 sub_video_min_hits（默认 15 帧≈0.5s），
+            # 避免瞬时噪声 ID 在下载的 ZIP/列表里变成"多出来的虫子"。
+            if track.sub_video_writer is None and track.confirmed \
+                    and track.hits >= self.sub_video_min_hits:
                 self._ensure_sub_writer(track)
             centroid = ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
             self.track_history[track.track_id].append(centroid)
@@ -2698,6 +2708,13 @@ class EnhancedWormTracker:
                     if any(self.compute_iou(ghost_box, lb) > self.ghost_suppress_iou
                            for lb in live_boxes):
                         self.shadowed_ids.add(tid)
+
+        # 本帧"真正在跟踪"的目标数：已确认 + 本帧有观测（匹配）或处于贴合共享。
+        # 界面"活跃目标"用这个数，而不是 len(self.tracks)（后者含后台保留 600 秒的残留轨迹）。
+        self.live_track_count = sum(
+            1 for t in self.tracks
+            if int(t.track_id) in self.confirmed_ids and t.lost_frames == 0
+        )
 
         return detections
 
